@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ModelingEvolution.HdrSplitControl</RootNamespace>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>ModelingEvolution.HdrSplitControl</PackageId>
+    <Authors>ModelingEvolution</Authors>
+    <Description>HDR Split Canvas Controls for Blazor</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="9.0.9" />
+    <PackageReference Include="ModelingEvolution.Drawing" Version="1.0.58.36" />
+  </ItemGroup>
+
+
+</Project>

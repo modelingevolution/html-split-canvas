@@ -1,0 +1,120 @@
+@namespace ModelingEvolution.HdrSplitControl.Components
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<link rel="stylesheet" href="_content/ModelingEvolution.HdrSplitControl/hdr-split.css" />
+
+
+<div id="hdr-container-@instanceId">
+    <canvas id="grayscaleBar-@instanceId"></canvas>
+    <canvas id="outputBar-@instanceId"></canvas>
+    <div id="infoBox-@instanceId" style="display: flex; align-items: center; gap: 20px;">
+        <span style="display: inline-flex; align-items: center;">
+            <span style="color: #888; margin-right: 8px;">Value:</span>
+            <strong id="valueDisplay-@instanceId" style="display: inline-block; width: 35px; text-align: right;">--</strong>
+        </span>
+        <span style="display: inline-flex; align-items: center;">
+            <span style="color: #888; margin-right: 8px;">Hex:</span>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+                <span id="colorBox-@instanceId" style="display: inline-block; width: 20px; height: 20px; border: 1px solid #4a4a4a; border-radius: 3px; background-color: #000;" title="Input color"></span>
+                <span id="outputColorBox-@instanceId" style="display: inline-block; width: 20px; height: 20px; border: 1px solid #4a4a4a; border-radius: 3px; background-color: #000;" title="Output color"></span>
+                <strong id="hexDisplay-@instanceId" style="display: inline-block; width: 70px;">--</strong>
+            </span>
+        </span>
+        <span style="display: inline-flex; align-items: center;">
+            <span style="color: #888; margin-right: 8px;">Weight:</span>
+            <strong id="weightDisplay-@instanceId" style="display: inline-block; width: 60px; text-align: right;">--</strong>
+        </span>
+    </div>
+    <canvas id="canvas-@instanceId"></canvas>
+    <div id="controls-@instanceId">
+        <button id="saveBtn-@instanceId">Save to File</button>
+        <button id="loadBtn-@instanceId">Load from File</button>
+        <input type="file" id="fileInput-@instanceId" accept=".json" style="display: none;">
+    </div>
+    <div id="info-@instanceId">
+        Click to add points | Double-click to remove | Drag to move | Shift+drag control points for symmetry
+    </div>
+</div>
+
+@code {
+    private static int nextInstanceId = 0;
+    private readonly int instanceId;
+    private DotNetObjectReference<HdrSplitCanvas>? objRef;
+    private readonly HdrCurveState curveState = new();
+
+    [Parameter] public float[] Weights { get; set; } = new float[256];
+    [Parameter] public EventCallback<float[]> WeightsChanged { get; set; }
+
+    public HdrSplitCanvas()
+    {
+        instanceId = Interlocked.Increment(ref nextInstanceId);
+    }
+
+    /// <summary>
+    /// Gets the current curve points
+    /// </summary>
+    public IReadOnlyDictionary<int, CurvePoint> Points => curveState.Points;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Create a reference to this component for JS callbacks
+            objRef = DotNetObjectReference.Create(this);
+
+            // Initialize with the instance ID and callback reference
+            await JS.InvokeVoidAsync("hdrGrayCanvasInit", instanceId, objRef);
+        }
+    }
+
+    private async Task UpdateWeights()
+    {
+        Weights = curveState.Weights;
+        
+            await WeightsChanged.InvokeAsync(Weights);
+    }
+
+    // Event callbacks from JavaScript
+    [JSInvokable("a")]  // pointAdded
+    public async Task OnPointAdded(int pointId, float x, float y)
+    {
+        curveState.AddPoint(pointId, x, y);
+        await UpdateWeights();
+    }
+
+    [JSInvokable("d")]  // pointRemoved
+    public async Task OnPointRemoved(int pointId)
+    {
+        curveState.RemovePoint(pointId);
+        await UpdateWeights();
+    }
+
+    [JSInvokable("mv")] // pointMovedTo
+    public async Task OnPointMovedTo(int pointId, float x, float y)
+    {
+        curveState.MovePoint(pointId, x, y);
+        await UpdateWeights();
+    }
+
+    [JSInvokable("c1m")] // controlVector1Moved
+    public async Task OnControlVector1Moved(int pointId, float dx, float dy)
+    {
+        curveState.MoveControlVector1(pointId, dx, dy);
+        await UpdateWeights();
+    }
+
+    [JSInvokable("c2m")] // controlVector2Moved
+    public async Task OnControlVector2Moved(int pointId, float dx, float dy)
+    {
+        curveState.MoveControlVector2(pointId, dx, dy);
+        await UpdateWeights();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        objRef?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

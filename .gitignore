@@ -1,0 +1,16 @@
+node_modules/
+.DS_Store
+*.log
+.vscode/
+.idea/
+dist/
+build/
+/src/.vs/HdrSplitControl.Demo/v17
+/src/HdrSplitControl.Demo/.vs/HdrSplitControl.Demo
+/src/HdrSplitControl.Demo/bin/Debug/net9.0
+/src/HdrSplitControl.Demo/obj
+/src/ModelingEvolution.HdrSplitControl/bin/Debug
+/src/ModelingEvolution.HdrSplitControl/obj
+/src/.vs/HdrSplitControl.Demo
+/src/ModelingEvolution.HdrSplitControl.Tests/bin/Debug/net9.0
+/src/ModelingEvolution.HdrSplitControl.Tests/obj

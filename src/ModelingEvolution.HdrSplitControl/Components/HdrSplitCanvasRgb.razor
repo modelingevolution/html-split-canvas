@@ -1,0 +1,143 @@
+@namespace ModelingEvolution.HdrSplitControl.Components
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<link rel="stylesheet" href="_content/ModelingEvolution.HdrSplitControl/hdr-split.css" />
+<script src="_content/ModelingEvolution.HdrSplitControl/hdr-split-rgb.js"></script>
+
+<div id="hdr-container-rgb-@instanceId">
+    <canvas id="grayscaleBar-@instanceId"></canvas>
+    <canvas id="outputBar-@instanceId"></canvas>
+    <div id="infoBox-@instanceId">
+        <div style="display: flex; align-items: center; gap: 20px;">
+            <span style="display: inline-flex; align-items: center;">
+                <span style="color: #888; margin-right: 8px;">Value:</span>
+                <strong id="valueDisplay-@instanceId" style="display: inline-block; width: 35px; text-align: right;">--</strong>
+            </span>
+            <span style="display: inline-flex; align-items: center;">
+                <span style="color: #888; margin-right: 8px;">Hex:</span>
+                <span style="display: inline-flex; align-items: center; gap: 6px;">
+                    <span id="colorBox-@instanceId" style="display: inline-block; width: 20px; height: 20px; border: 1px solid #4a4a4a; border-radius: 3px; background-color: #000;" title="Input color"></span>
+                    <span id="outputColorBox-@instanceId" style="display: inline-block; width: 20px; height: 20px; border: 1px solid #4a4a4a; border-radius: 3px; background-color: #000;" title="Output color"></span>
+                    <strong id="hexDisplay-@instanceId" style="display: inline-block; width: 70px;">--</strong>
+                </span>
+            </span>
+            <span style="display: inline-flex; align-items: center; gap: 15px;">
+                <span style="color: #888;">Weights -</span>
+                <span style="display: inline-flex; align-items: center;">
+                    <span style="color: #ff4444; margin-right: 5px;">R:</span>
+                    <strong id="rWeight-@instanceId" style="display: inline-block; width: 45px; text-align: right;">--</strong>
+                </span>
+                <span style="display: inline-flex; align-items: center;">
+                    <span style="color: #44ff44; margin-right: 5px;">G:</span>
+                    <strong id="gWeight-@instanceId" style="display: inline-block; width: 45px; text-align: right;">--</strong>
+                </span>
+                <span style="display: inline-flex; align-items: center;">
+                    <span style="color: #4488ff; margin-right: 5px;">B:</span>
+                    <strong id="bWeight-@instanceId" style="display: inline-block; width: 45px; text-align: right;">--</strong>
+                </span>
+            </span>
+        </div>
+    </div>
+    <canvas id="canvas-@instanceId"></canvas>
+    <div id="controls-@instanceId">
+        <button id="saveBtn-@instanceId">Save to File</button>
+        <button id="loadBtn-@instanceId">Load from File</button>
+        <input type="file" id="fileInput-@instanceId" accept=".json" style="display: none;">
+    </div>
+    <div id="info-@instanceId">
+        Click to add points | Double-click to remove | Drag to move | Shift+drag control points for symmetry
+    </div>
+</div>
+
+@code {
+    private static int nextInstanceId = 0;
+    private readonly int instanceId;
+    private DotNetObjectReference<HdrSplitCanvasRgb>? objRef;
+    private readonly HdrRgbCurveState curveState = new();
+
+    [Parameter] public Dictionary<string, float[]>? RgbWeights { get; set; }
+    [Parameter] public EventCallback<Dictionary<string, float[]>> RgbWeightsChanged { get; set; }
+
+    public HdrSplitCanvasRgb()
+    {
+        instanceId = Interlocked.Increment(ref nextInstanceId);
+    }
+
+    /// <summary>
+    /// Gets the current curve points for all channels
+    /// </summary>
+    public IReadOnlyDictionary<string, float[]> ChannelWeights => curveState.Weights;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Create a reference to this component for JS callbacks
+            objRef = DotNetObjectReference.Create(this);
+
+            // Wait a bit for the script to load
+            await Task.Delay(100);
+
+            // Step 5: Initialize with instance ID and dotnet ref
+            try
+            {
+                await JS.InvokeVoidAsync("hdrRgbCanvasInit", instanceId, objRef);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error initializing RGB canvas: {ex.Message}");
+            }
+        }
+    }
+
+    private async Task UpdateWeights()
+    {
+        var weights = new Dictionary<string, float[]>(curveState.Weights);
+        RgbWeights = weights;
+        await RgbWeightsChanged.InvokeAsync(weights);
+    }
+
+    // Event callbacks from JavaScript with channel parameter
+    [JSInvokable("a")]  // pointAdded
+    public async Task OnPointAdded(int pointId, float x, float y, string channel)
+    {
+        curveState.AddPoint(pointId, x, y, channel);
+        await UpdateWeights();
+    }
+
+    [JSInvokable("d")]  // pointRemoved
+    public async Task OnPointRemoved(int pointId, string channel)
+    {
+        curveState.RemovePoint(pointId, channel);
+        await UpdateWeights();
+    }
+
+    [JSInvokable("mv")] // pointMovedTo
+    public async Task OnPointMovedTo(int pointId, float x, float y, string channel)
+    {
+        curveState.MovePoint(pointId, x, y, channel);
+        await UpdateWeights();
+    }
+
+    [JSInvokable("c1m")] // controlVector1Moved
+    public async Task OnControlVector1Moved(int pointId, float dx, float dy, string channel)
+    {
+        curveState.MoveControlVector1(pointId, dx, dy, channel);
+        await UpdateWeights();
+    }
+
+    [JSInvokable("c2m")] // controlVector2Moved
+    public async Task OnControlVector2Moved(int pointId, float dx, float dy, string channel)
+    {
+        curveState.MoveControlVector2(pointId, dx, dy, channel);
+        await UpdateWeights();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        objRef?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

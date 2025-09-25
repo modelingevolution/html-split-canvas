@@ -1,0 +1,109 @@
+.hdr-split-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background-color: #2a2a2a;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 20px rgba(0,0,0,0.5);
+}
+
+.hdr-split-canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid #3a3a3a;
+    cursor: crosshair;
+    background-color: #1e1e1e;
+}
+
+.hdr-grayscale-bar {
+    margin-bottom: 0;
+    border-radius: 4px 4px 0 0;
+    height: 40px;
+}
+
+.hdr-output-bar {
+    margin-bottom: 10px;
+    border-radius: 0 0 4px 4px;
+    height: 20px;
+    border-top: 1px solid #3a3a3a;
+}
+
+.hdr-info-box {
+    background-color: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    padding: 10px 15px;
+    margin: 10px 0;
+    font-size: 13px;
+    color: #aaa;
+    min-width: 600px;
+    font-family: 'Courier New', monospace;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.hdr-info-box strong {
+    color: #00d4ff;
+    cursor: text;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+.hdr-info-box strong.editable {
+    background-color: #3a3a3a;
+    outline: 1px solid #00d4ff;
+}
+
+.hdr-info-box input.inline-edit {
+    background-color: #1e1e1e;
+    border: none;
+    outline: 1px solid #00d4ff;
+    color: #fff;
+    padding: 2px 4px;
+    border-radius: 3px;
+    width: 60px;
+    font-size: inherit;
+    font-weight: bold;
+    text-align: right;
+    font-family: 'Courier New', monospace;
+}
+
+.hdr-controls {
+    margin: 10px 0;
+    display: flex;
+    gap: 10px;
+}
+
+.hdr-controls button {
+    background-color: #3a3a3a;
+    color: #aaa;
+    border: 1px solid #4a4a4a;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+
+.hdr-controls button:hover {
+    background-color: #4a4a4a;
+    color: #00d4ff;
+    border-color: #00d4ff;
+}
+
+.hdr-info {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #aaa;
+}
+
+.hdr-color-box {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 1px solid #4a4a4a;
+    border-radius: 3px;
+    background-color: #000;
+}

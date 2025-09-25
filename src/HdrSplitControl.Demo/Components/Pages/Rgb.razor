@@ -1,0 +1,84 @@
+@page "/rgb"
+@rendermode InteractiveServer
+@using ModelingEvolution.HdrSplitControl.Components
+
+<PageTitle>RGB HDR Split Canvas</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge">
+    <MudText Typo="Typo.h4" Class="mb-4">RGB HDR Split Canvas</MudText>
+
+    <HdrSplitCanvasRgb @bind-RgbWeights="rgbWeights" />
+
+    <MudPaper Class="mt-4 pa-4">
+        <MudText Typo="Typo.h6" Class="mb-2">RGB Weight Curves (C# Calculated)</MudText>
+        <svg width="512" height="200" style="border: 1px solid #424242; background: #1e1e1e; display: block;">
+            @if (rgbWeights != null)
+            {
+                <!-- Grid lines -->
+                @for (int i = 0; i <= 10; i++)
+                {
+                    var y = i * 20;
+                    <line x1="0" y1="@y" x2="512" y2="@y" stroke="#333" stroke-width="0.5" />
+                }
+                @for (int i = 0; i <= 10; i++)
+                {
+                    var x = i * 51.2;
+                    <line x1="@x" y1="0" x2="@x" y2="200" stroke="#333" stroke-width="0.5" />
+                }
+
+                <!-- Red channel curve -->
+                @if (rgbWeights.ContainsKey("r"))
+                {
+                    <path d="@GetWeightPath(rgbWeights["r"])" fill="none" stroke="#ff4444" stroke-width="2" opacity="0.8" />
+                }
+
+                <!-- Green channel curve -->
+                @if (rgbWeights.ContainsKey("g"))
+                {
+                    <path d="@GetWeightPath(rgbWeights["g"])" fill="none" stroke="#44ff44" stroke-width="2" opacity="0.8" />
+                }
+
+                <!-- Blue channel curve -->
+                @if (rgbWeights.ContainsKey("b"))
+                {
+                    <path d="@GetWeightPath(rgbWeights["b"])" fill="none" stroke="#4488ff" stroke-width="2" opacity="0.8" />
+                }
+
+                <!-- Reference line at 0.5 -->
+                <line x1="0" y1="100" x2="512" y2="100" stroke="#666" stroke-width="1" stroke-dasharray="5,5" />
+
+                <!-- Axes -->
+                <line x1="0" y1="200" x2="512" y2="200" stroke="#888" stroke-width="1" />
+                <line x1="0" y1="0" x2="0" y2="200" stroke="#888" stroke-width="1" />
+            }
+        </svg>
+
+        <MudText Typo="Typo.body2" Class="mt-2">
+            <span style="color: #ff4444">Red</span> •
+            <span style="color: #44ff44">Green</span> •
+            <span style="color: #4488ff">Blue</span>
+        </MudText>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private Dictionary<string, float[]>? rgbWeights;
+
+    private string GetWeightPath(float[] weights)
+    {
+        if (weights == null || weights.Length == 0)
+            return "";
+
+        var path = new System.Text.StringBuilder();
+        path.Append($"M 0,{200 - weights[0] * 200:F1}");
+
+        for (int i = 1; i < 256; i++)
+        {
+            var x = i * 2; // Scale X to fit 512 width (256 * 2)
+            var y = 200 - (weights[i] * 200); // Invert Y and scale
+            path.Append($" L {x},{y:F1}");
+        }
+
+        return path.ToString();
+    }
+}
