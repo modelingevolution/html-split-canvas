@@ -1,10 +1,15 @@
+using System.Collections.Immutable;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 using ModelingEvolution.Drawing;
+using ModelingEvolution.JsonParsableConverter;
 using VectorF = ModelingEvolution.Drawing.Vector<float>;
 using PointF = ModelingEvolution.Drawing.Point<float>;
 using BezierF = ModelingEvolution.Drawing.BezierCurve<float>;
 
 namespace ModelingEvolution.HdrSplitControl;
+
 
 /// <summary>
 /// Represents a point on the HDR curve with Bezier control vectors
@@ -46,13 +51,29 @@ public class CurvePoint
 /// <summary>
 /// Manages the curve state and calculates weights
 /// </summary>
-public class HdrCurveState
+[JsonConverter(typeof(JsonParsableConverter<HdrCurveState>))]
+public class HdrCurveState : IParsable<HdrCurveState>
 {
     private readonly Dictionary<int, CurvePoint> _pointsById = new();
     private readonly SortedList<float, CurvePoint> _sortedPoints = new();
     private readonly float[] _weights = new float[256];
     private readonly Dictionary<(int, int), BezierF> _bezierCache = new();
     private bool _needsRecalculation = true;
+    private int _baseId = 1;
+
+    public void SetBase(int baseId)
+    {
+        _baseId = baseId;
+        // The base ID is used to map between JavaScript IDs (starting from baseId)
+        // and C# IDs when reloading from a Path
+    }
+
+    public void Clear()
+    {
+        _pointsById.Clear();
+        _sortedPoints.Clear();
+        InvalidateCache();
+    }
 
     public IReadOnlyDictionary<int, CurvePoint> Points => _pointsById;
     public float[] Weights
@@ -77,7 +98,7 @@ public class HdrCurveState
     public void AddPoint(int id, float x, float y)
     {
         // Fail-fast validation
-        // ID validation removed - JavaScript generates large IDs using Date.now()
+        // ID validation removed - JavaScript uses incrementing IDs starting from 1
         if (x < 0 || x > 255)
             throw new ArgumentOutOfRangeException(nameof(x), "X coordinate must be between 0 and 255");
         if (y < 0 || y > 1)
@@ -109,6 +130,11 @@ public class HdrCurveState
         InvalidateCache();
     }
 
+    public override string ToString()
+    {
+        return Path<float>.FromSegments(this.GetBezierSegments().Select(x => x.Item2)).ToString();
+    }
+
     public void RemovePoint(int id)
     {
 
@@ -123,7 +149,6 @@ public class HdrCurveState
     public void MovePoint(int id, float x, float y)
     {
         // Fail-fast validation
-        // ID validation removed - JavaScript generates large IDs using Date.now()
         if (x < 0 || x > 255)
             throw new ArgumentOutOfRangeException(nameof(x), "X coordinate must be between 0 and 255");
         if (y < 0 || y > 1)
@@ -154,7 +179,6 @@ public class HdrCurveState
 
     public void MoveControlVector1(int id, float dx, float dy)
     {
-        // ID validation removed - JavaScript generates large IDs using Date.now()
         if (float.IsNaN(dx) || float.IsInfinity(dx))
             throw new ArgumentException("Invalid dx value", nameof(dx));
         if (float.IsNaN(dy) || float.IsInfinity(dy))
@@ -169,7 +193,6 @@ public class HdrCurveState
 
     public void MoveControlVector2(int id, float dx, float dy)
     {
-        // ID validation removed - JavaScript generates large IDs using Date.now()
         if (float.IsNaN(dx) || float.IsInfinity(dx))
             throw new ArgumentException("Invalid dx value", nameof(dx));
         if (float.IsNaN(dy) || float.IsInfinity(dy))
@@ -211,28 +234,8 @@ public class HdrCurveState
         }
 
         // Create Bezier curves for each adjacent pair of points
-        for (int i = 0; i < points.Length - 1; i++)
-        {
-            var key = (points[i].Id, points[i + 1].Id);
-            if (!_bezierCache.ContainsKey(key))
-            {
-                var leftPoint = points[i];
-                var rightPoint = points[i + 1];
-                var p0 = leftPoint.Position;
-                var p3 = rightPoint.Position;
-
-                // Use control vectors if available, otherwise create defaults
-                var p1 = leftPoint.ControlVector2.HasValue
-                    ? leftPoint.Position + leftPoint.ControlVector2.Value
-                    : new PointF(p0.X + (p3.X - p0.X) * 0.33f, p0.Y);
-
-                var p2 = rightPoint.ControlVector1.HasValue
-                    ? rightPoint.Position + rightPoint.ControlVector1.Value
-                    : new PointF(p0.X + (p3.X - p0.X) * 0.67f, p3.Y);
-
-                _bezierCache[key] = new BezierF(p0, p1, p2, p3);
-            }
-        }
+        foreach (var (key, bezier) in GetBezierSegments()) 
+            _bezierCache.TryAdd(key, bezier);
 
         // Calculate weights using cached Bezier curves
         for (int x = 0; x < 256; x++)
@@ -249,6 +252,38 @@ public class HdrCurveState
             "One or more weights are outside the valid range [0,1]");
 
         _needsRecalculation = false;
+    }
+
+    private ((int, int), BezierF) CreateBezierSegment(CurvePoint leftPoint, CurvePoint rightPoint)
+    {
+        var key = (leftPoint.Id, rightPoint.Id);
+        var p0 = leftPoint.Position;
+        var p3 = rightPoint.Position;
+
+        // Use control vectors if available, otherwise create defaults
+        var p1 = leftPoint.ControlVector2.HasValue
+            ? leftPoint.Position + leftPoint.ControlVector2.Value
+            : new PointF(p0.X + (p3.X - p0.X) * 0.33f, p0.Y);
+
+        var p2 = rightPoint.ControlVector1.HasValue
+            ? rightPoint.Position + rightPoint.ControlVector1.Value
+            : new PointF(p0.X + (p3.X - p0.X) * 0.67f, p3.Y);
+
+        var bezier = new BezierF(p0, p1, p2, p3);
+        return (key, bezier);
+    }
+
+    public IEnumerable<((int, int), BezierF)> GetBezierSegments()
+    {
+        if (_sortedPoints.Count < 2)
+            yield break;
+
+        var points = _sortedPoints.Values.ToArray();
+
+        for (int i = 0; i < points.Length - 1; i++)
+        {
+            yield return CreateBezierSegment(points[i], points[i + 1]);
+        }
     }
 
     private float GetValueAtX(float x, CurvePoint[] sortedPoints)
@@ -324,4 +359,80 @@ public class HdrCurveState
 
         return (tMin + tMax) / 2f;
     }
+
+    public static HdrCurveState Parse(string s, IFormatProvider? provider)
+    {
+        if (TryParse(s, provider, out var result))
+        {
+            return result;
+        }
+        throw new FormatException($"Unable to parse HdrCurveState from: '{s}'");
+    }
+
+    public static bool TryParse([NotNullWhen(true)] string? s, IFormatProvider? provider, [MaybeNullWhen(false)] out HdrCurveState result)
+    {
+        result = null;
+        int seq = 0;
+        try
+        {
+            if (!Path<float>.TryParse(s, provider, out var path))
+            {
+                return false;
+            }
+
+            result = new HdrCurveState().Load(seq, path);
+            return true;
+        }
+        catch
+        {
+            result = null;
+            return false;
+        }
+    }
+
+    public HdrCurveState Load(int seq, in Path<float> path)
+    {
+        this._pointsById.Clear();
+        this._sortedPoints.Clear();
+        // Track points we've already added
+        var pointIdByPosition = new Dictionary<PointF, int>();
+
+        foreach (var segment in path.Segments)
+        {
+            // Add or get start point
+            if (!pointIdByPosition.TryGetValue(segment.Start, out var startId))
+            {
+                startId = seq++;
+                this.AddPoint(startId, segment.Start.X, segment.Start.Y);
+                pointIdByPosition[segment.Start] = startId;
+            }
+
+            // Add or get end point
+            if (!pointIdByPosition.TryGetValue(segment.End, out var endId))
+            {
+                endId = seq++;
+                this.AddPoint(endId, segment.End.X, segment.End.Y);
+                pointIdByPosition[segment.End] = endId;
+            }
+
+            // Set control vectors for the points
+            // Start point's ControlVector2 = C0 - Start (right control)
+            var startPoint = this._pointsById[startId];
+            startPoint.ControlVector2 = new VectorF(
+                segment.C0.X - segment.Start.X,
+                segment.C0.Y - segment.Start.Y
+            );
+
+            // End point's ControlVector1 = C1 - End (left control)
+            var endPoint = this._pointsById[endId];
+            endPoint.ControlVector1 = new VectorF(
+                segment.C1.X - segment.End.X,
+                segment.C1.Y - segment.End.Y
+            );
+        }
+
+        return this;
+    }
+
+   
 }

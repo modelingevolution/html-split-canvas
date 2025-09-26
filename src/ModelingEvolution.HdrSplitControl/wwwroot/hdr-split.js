@@ -887,6 +887,230 @@ class HDRSplitCanvas {
             return false;
         }
     }
+
+    // Reset curve to default (only start and end points at 0.5)
+    reset() {
+        // Clear all existing points
+        this.points = [];
+        this.nextPointId = 1;
+
+        // Add default points at 0.5
+        const startPoint = {
+            id: this.nextPointId++,
+            x: 0,
+            y: 0.5,
+            c1: null,
+            c2: { x: 10, y: 0.5 }
+        };
+
+        const endPoint = {
+            id: this.nextPointId++,
+            x: 255,
+            y: 0.5,
+            c1: { x: 245, y: 0.5 },
+            c2: null
+        };
+
+        this.points.push(startPoint);
+        this.points.push(endPoint);
+
+        // Clear selection
+        this.selectedPoint = null;
+        this.hoveredPoint = null;
+        this.draggedPoint = null;
+
+        // Notify C# about the reset
+        if (this.dotnetRef) {
+            // First, notify about removing all existing points except the defaults
+            // We'll send the new state by notifying about the two default points
+            this.dotnetRef.invokeMethodAsync('rst'); // reset notification
+
+            // Then add the default points
+            this.dotnetRef.invokeMethodAsync('a', startPoint.id, startPoint.x, startPoint.y);
+            this.dotnetRef.invokeMethodAsync('a', endPoint.id, endPoint.x, endPoint.y);
+
+            // Set their control vectors
+            this.dotnetRef.invokeMethodAsync('c2m', startPoint.id, 10, 0);
+            this.dotnetRef.invokeMethodAsync('c1m', endPoint.id, -10, 0);
+        }
+
+        // Update display
+        this.render();
+        this.calculateWeights();
+    }
+
+    // Reload state from SVG path string and return base ID (minimum ID)
+    reload(pathString) {
+        if (!pathString || pathString.trim() === '') {
+            // Empty path - reset to defaults
+            this.points = [];
+            this.nextPointId = 1;
+            this.initializePoints();
+            this.render();
+            this.calculateWeights();
+            return 1; // Base ID for default points
+        }
+
+        // Parse SVG path string
+        const segments = this.parseSVGPath(pathString);
+        if (segments.length === 0) {
+            console.error('Failed to parse SVG path');
+            return -1; // Error indicator
+        }
+
+        // Clear current points
+        this.points = [];
+
+        // Track unique points by position
+        const pointMap = new Map(); // Key: "x,y" string, Value: point object
+        let currentId = 1;
+        let minId = Number.MAX_VALUE;
+
+        // Process each Bezier segment
+        for (const segment of segments) {
+            const { p0, p1, p2, p3 } = segment;
+
+            // Process start point
+            const startKey = `${p0.x},${p0.y}`;
+            if (!pointMap.has(startKey)) {
+                const startPoint = {
+                    id: currentId++,
+                    x: Math.round(p0.x), // Round to integer for pixel values
+                    y: p0.y,
+                    c1: null,
+                    c2: null
+                };
+                pointMap.set(startKey, startPoint);
+                minId = Math.min(minId, startPoint.id);
+            }
+
+            // Process end point
+            const endKey = `${p3.x},${p3.y}`;
+            if (!pointMap.has(endKey)) {
+                const endPoint = {
+                    id: currentId++,
+                    x: Math.round(p3.x),
+                    y: p3.y,
+                    c1: null,
+                    c2: null
+                };
+                pointMap.set(endKey, endPoint);
+                minId = Math.min(minId, endPoint.id);
+            }
+
+            // Now set control vectors based on control points
+            const startPoint = pointMap.get(startKey);
+            const endPoint = pointMap.get(endKey);
+
+            // Right control vector for start point (p1 relative to p0)
+            startPoint.c2 = {
+                x: p1.x,
+                y: p1.y
+            };
+
+            // Left control vector for end point (p2 relative to p3)
+            endPoint.c1 = {
+                x: p2.x,
+                y: p2.y
+            };
+        }
+
+        // Convert map to array and sort by x
+        this.points = Array.from(pointMap.values()).sort((a, b) => a.x - b.x);
+
+        // Update nextPointId to avoid collisions
+        this.nextPointId = currentId;
+
+        // Clear selection
+        this.selectedPoint = null;
+        this.hoveredPoint = null;
+        this.draggedPoint = null;
+
+        // Update display
+        this.render();
+        this.calculateWeights();
+
+        // Don't notify C# - it already has the Path data and will rebuild its own state
+        // This avoids unnecessary round-trips and callbacks
+
+        return minId; // Return the minimum ID found for C# synchronization
+    }
+
+    // Parse SVG path string to extract Bezier segments
+    parseSVGPath(pathString) {
+        const segments = [];
+        const commands = pathString.match(/[MLCZmlcz][^MLCZmlcz]*/g);
+
+        if (!commands) return segments;
+
+        let currentX = 0;
+        let currentY = 0;
+        let startX = 0;
+        let startY = 0;
+
+        for (const cmd of commands) {
+            const type = cmd[0];
+            const coords = cmd.slice(1).trim()
+                .split(/[\s,]+/)
+                .filter(s => s.length > 0)
+                .map(parseFloat);
+
+            switch (type.toUpperCase()) {
+                case 'M': // Move to
+                    currentX = coords[0];
+                    currentY = coords[1];
+                    startX = currentX;
+                    startY = currentY;
+                    break;
+
+                case 'C': // Cubic Bezier
+                    if (coords.length >= 6) {
+                        segments.push({
+                            p0: { x: currentX, y: currentY },
+                            p1: { x: coords[0], y: coords[1] },
+                            p2: { x: coords[2], y: coords[3] },
+                            p3: { x: coords[4], y: coords[5] }
+                        });
+                        currentX = coords[4];
+                        currentY = coords[5];
+                    }
+                    break;
+
+                case 'L': // Line to (convert to Bezier)
+                    if (coords.length >= 2) {
+                        const targetX = coords[0];
+                        const targetY = coords[1];
+
+                        // Convert line to cubic Bezier with control points at 1/3 and 2/3
+                        segments.push({
+                            p0: { x: currentX, y: currentY },
+                            p1: { x: currentX + (targetX - currentX) / 3, y: currentY + (targetY - currentY) / 3 },
+                            p2: { x: currentX + (targetX - currentX) * 2 / 3, y: currentY + (targetY - currentY) * 2 / 3 },
+                            p3: { x: targetX, y: targetY }
+                        });
+                        currentX = targetX;
+                        currentY = targetY;
+                    }
+                    break;
+
+                case 'Z': // Close path
+                    if (Math.abs(currentX - startX) > 0.001 || Math.abs(currentY - startY) > 0.001) {
+                        // Add closing segment as line converted to Bezier
+                        segments.push({
+                            p0: { x: currentX, y: currentY },
+                            p1: { x: currentX + (startX - currentX) / 3, y: currentY + (startY - currentY) / 3 },
+                            p2: { x: currentX + (startX - currentX) * 2 / 3, y: currentY + (startY - currentY) * 2 / 3 },
+                            p3: { x: startX, y: startY }
+                        });
+                        currentX = startX;
+                        currentY = startY;
+                    }
+                    break;
+            }
+        }
+
+        return segments;
+    }
 }
 
 // Main initialization function
@@ -931,11 +1155,8 @@ function hdrGrayCanvasInit(id, dotnetRef) {
 
     const hdrSplit = new HDRSplitCanvas(canvas, grayscaleBar, outputBar, elementIds, dotnetRef);
 
-    // Store instance with the specific id
-    if (!window.hdrSplitInstances) {
-        window.hdrSplitInstances = {};
-    }
-    window.hdrSplitInstances[id] = hdrSplit;
+    // Store instance in the global Map
+    window.hdrInstances.set(id, hdrSplit);
 
     // Save button functionality
     const saveBtn = document.getElementById(elementIds.saveBtn);
@@ -960,16 +1181,9 @@ function hdrGrayCanvasInit(id, dotnetRef) {
         });
     }
 
-    // Load button functionality
-    const loadBtn = document.getElementById(elementIds.loadBtn);
+    // File input handler for Blazor integration
     const fileInput = document.getElementById(elementIds.fileInput);
-
-    if (loadBtn && fileInput) {
-        loadBtn.addEventListener('click', () => {
-            fileInput.click();
-        });
-
-        // File input handler
+    if (fileInput) {
         fileInput.addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (!file) return;
@@ -982,7 +1196,7 @@ function hdrGrayCanvasInit(id, dotnetRef) {
                 if (success) {
                     console.log(`Loaded curve from ${file.name}`);
                 } else {
-                    alert('Failed to load curve file. Please check the file format.');
+                    console.error('Failed to load curve file. Please check the file format.');
                 }
 
                 // Clear the input so the same file can be loaded again
@@ -990,7 +1204,7 @@ function hdrGrayCanvasInit(id, dotnetRef) {
             };
 
             reader.onerror = () => {
-                alert('Error reading file');
+                console.error('Error reading file');
                 event.target.value = '';
             };
 
@@ -1008,5 +1222,23 @@ function hdrGrayCanvasInit(id, dotnetRef) {
     console.log('  Set custom state: hdrSplit.setState({...})');
 }
 
+// Initialize the global instances storage
+if (!window.hdrInstances) {
+    window.hdrInstances = new Map();
+}
+
 // Export the initialization function to window for global access
 window.hdrGrayCanvasInit = hdrGrayCanvasInit;
+
+// Global reload function for clean C# interop
+window.hdrGrayCanvasReload = function(instanceId, pathString) {
+    const instance = window.hdrInstances.get(instanceId);
+    if (!instance) {
+        console.error(`HDR instance ${instanceId} not found`);
+        return -1;
+    }
+
+    // Parse the SVG path and rebuild the curve
+    const baseId = instance.reload(pathString);
+    return baseId;
+};

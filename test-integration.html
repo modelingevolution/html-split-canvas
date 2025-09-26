@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HDR Split Canvas - Integration Test</title>
+    <link rel="stylesheet" href="src/ModelingEvolution.HdrSplitControl/wwwroot/hdr-split.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #ddd;
+        }
+        h1 {
+            color: #00d4ff;
+        }
+        .test-container {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #333;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>HDR Split Canvas - Integration Test</h1>
+
+    <div class="test-container">
+        <h2>Test Instance 1 - With Controls</h2>
+        <div id="hdr-container-1">
+            <canvas id="grayscaleBar-1"></canvas>
+            <canvas id="outputBar-1"></canvas>
+            <div id="infoBox-1" style="display: flex; align-items: center; gap: 20px;">
+                <span style="display: inline-flex; align-items: center;">
+                    <span style="color: #888; margin-right: 8px;">Value:</span>
+                    <strong id="valueDisplay-1" style="display: inline-block; width: 35px; text-align: right;">--</strong>
+                </span>
+                <span style="display: inline-flex; align-items: center;">
+                    <span style="color: #888; margin-right: 8px;">Hex:</span>
+                    <span style="display: inline-flex; align-items: center; gap: 6px;">
+                        <span id="colorBox-1" style="display: inline-block; width: 20px; height: 20px; border: 1px solid #4a4a4a; border-radius: 3px; background-color: #000;" title="Input color"></span>
+                        <span id="outputColorBox-1" style="display: inline-block; width: 20px; height: 20px; border: 1px solid #4a4a4a; border-radius: 3px; background-color: #000;" title="Output color"></span>
+                        <strong id="hexDisplay-1" style="display: inline-block; width: 70px;">--</strong>
+                    </span>
+                </span>
+                <span style="display: inline-flex; align-items: center;">
+                    <span style="color: #888; margin-right: 8px;">Weight:</span>
+                    <strong id="weightDisplay-1" style="display: inline-block; width: 60px; text-align: right;">--</strong>
+                </span>
+            </div>
+            <canvas id="canvas-1"></canvas>
+            <div id="controls-1" style="display: flex; gap: 10px; padding: 10px 0;">
+                <button id="resetBtn-1" title="Reset curve to default">Reset</button>
+                <button id="saveBtn-1" title="Save curve to file">Save</button>
+                <button id="loadBtn-1" title="Load curve from file">Load</button>
+                <input type="file" id="fileInput-1" accept=".json" style="display: none;">
+            </div>
+            <div id="info-1" style="color: #888; font-size: 0.875rem;">
+                Click to add points | Double-click to remove | Drag to move | Shift+drag control points for symmetry
+            </div>
+        </div>
+    </div>
+
+    <div class="test-container">
+        <h2>Test Results</h2>
+        <div id="test-results">
+            <p>Weights array (first 10 values): <span id="weights-display">--</span></p>
+            <p>Path string: <span id="path-display">--</span></p>
+            <p>Events fired: <span id="events-display">0</span></p>
+        </div>
+    </div>
+
+    <script src="src/ModelingEvolution.HdrSplitControl/wwwroot/hdr-split.js"></script>
+    <script>
+        // Mock DotNetObjectReference for testing
+        const mockDotNetRef = {
+            eventCount: 0,
+            lastEvent: null,
+            invokeMethodAsync: function(method, ...args) {
+                this.eventCount++;
+                this.lastEvent = { method, args };
+                document.getElementById('events-display').textContent = this.eventCount;
+
+                // Log the event
+                console.log(`Event: ${method}`, args);
+
+                // Update displays based on event type
+                if (method === 'rst') {
+                    console.log('Reset event received');
+                }
+
+                return Promise.resolve();
+            }
+        };
+
+        // Initialize the HDR split canvas
+        window.hdrInstances = new Map();
+        hdrGrayCanvasInit(1, mockDotNetRef);
+
+        const instance = window.hdrInstances.get(1);
+
+        // Add reset button handler
+        document.getElementById('resetBtn-1').addEventListener('click', () => {
+            instance.reset();
+            document.getElementById('weights-display').textContent =
+                instance.weights.slice(0, 10).map(w => w.toFixed(2)).join(', ');
+        });
+
+        // Add save button handler
+        document.getElementById('saveBtn-1').addEventListener('click', () => {
+            const json = instance.exportJSON();
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'hdr-curve.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        // Display initial weights
+        setTimeout(() => {
+            if (instance && instance.weights) {
+                document.getElementById('weights-display').textContent =
+                    instance.weights.slice(0, 10).map(w => w.toFixed(2)).join(', ');
+            }
+        }, 100);
+    </script>
+</body>
+</html>

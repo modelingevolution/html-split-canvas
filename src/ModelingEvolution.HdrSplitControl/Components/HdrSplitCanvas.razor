@@ -1,10 +1,10 @@
 @namespace ModelingEvolution.HdrSplitControl.Components
 @using Microsoft.JSInterop
+@using ModelingEvolution.Drawing
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
 <link rel="stylesheet" href="_content/ModelingEvolution.HdrSplitControl/hdr-split.css" />
-
 
 <div id="hdr-container-@instanceId">
     <canvas id="grayscaleBar-@instanceId"></canvas>
@@ -28,12 +28,36 @@
         </span>
     </div>
     <canvas id="canvas-@instanceId"></canvas>
-    <div id="controls-@instanceId">
-        <button id="saveBtn-@instanceId">Save to File</button>
-        <button id="loadBtn-@instanceId">Load from File</button>
-        <input type="file" id="fileInput-@instanceId" accept=".json" style="display: none;">
-    </div>
-    <div id="info-@instanceId">
+
+    @if (ShowControls != 0)
+    {
+        <div id="controls-@instanceId" style="display: flex; gap: 10px; padding: 10px 0;">
+            @if (ShowControls.HasFlag(Controls.Reset))
+            {
+                <button @onclick="@ResetCurve" class="btn-icon" title="Reset curve to default">
+                    🔄
+                </button>
+            }
+
+            @if (ShowControls.HasFlag(Controls.Save))
+            {
+                <button @onclick="@SaveToFile" class="btn-icon" title="Save curve to file">
+                    💾
+                </button>
+            }
+
+            @if (ShowControls.HasFlag(Controls.Open))
+            {
+                <button @onclick="@LoadFromFile" class="btn-icon" title="Load curve from file">
+                    📁
+                </button>
+
+                <input type="file" id="fileInput-@instanceId" accept=".json" style="display: none;" @onchange="@HandleFileSelected">
+            }
+        </div>
+    }
+
+    <div id="info-@instanceId" style="color: #888; font-size: 0.875rem;">
         Click to add points | Double-click to remove | Drag to move | Shift+drag control points for symmetry
     </div>
 </div>
@@ -43,9 +67,25 @@
     private readonly int instanceId;
     private DotNetObjectReference<HdrSplitCanvas>? objRef;
     private readonly HdrCurveState curveState = new();
+    private Path<float> _lastPath;
+    private bool _isInitialized = false;
+    private bool _isUpdatingFromJS = false;
 
     [Parameter] public float[] Weights { get; set; } = new float[256];
     [Parameter] public EventCallback<float[]> WeightsChanged { get; set; }
+
+    [Parameter] public Path<float> Path { get; set; }
+    [Parameter] public EventCallback<Path<float>> PathChanged { get; set; }
+
+    [Flags]
+    public enum Controls
+    {
+        Save = 0x1,Open=0x2,Reset=0x4
+    }
+    /// <summary>
+    /// Controls visibility of save/load/reset buttons
+    /// </summary>
+    [Parameter] public Controls ShowControls { get; set; }
 
     public HdrSplitCanvas()
     {
@@ -57,6 +97,16 @@
     /// </summary>
     public IReadOnlyDictionary<int, CurvePoint> Points => curveState.Points;
 
+    protected override async Task OnParametersSetAsync()
+    {
+        // Only reload if Path actually changed and we're initialized
+        if (_isInitialized && !_isUpdatingFromJS && !Path.Equals(_lastPath))
+        {
+            await LoadPathToCanvas();
+            _lastPath = Path;
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -66,50 +116,189 @@
 
             // Initialize with the instance ID and callback reference
             await JS.InvokeVoidAsync("hdrGrayCanvasInit", instanceId, objRef);
+
+            _isInitialized = true;
+
+            // If we have an initial Path, load it
+            if (!Path.Equals(default(Path<float>)) && Path.Segments?.Count > 0)
+            {
+                await LoadPathToCanvas();
+                _lastPath = Path;
+            }
         }
     }
 
-    private async Task UpdateWeights()
+    private async Task LoadPathToCanvas()
     {
+        if (!_isInitialized) return;
+
+        // Send Path to JavaScript for rendering
+        var id = await JS.InvokeAsync<int>("hdrGrayCanvasReload", instanceId, Path.ToString());
+
+        curveState.Load(id, Path);
+    }
+
+    private async Task UpdateWeightsAndPath()
+    {
+        // Update weights
         Weights = curveState.Weights;
-        
-            await WeightsChanged.InvokeAsync(Weights);
+        await WeightsChanged.InvokeAsync(Weights);
+
+        // Generate and update path
+        var segments = curveState.GetBezierSegments().Select(x => x.Item2);
+        var newPath = Path<float>.FromSegments(segments);
+
+        // Only invoke PathChanged if the path actually changed
+        if (!newPath.Equals(_lastPath))
+        {
+            _lastPath = newPath;
+            Path = newPath;
+            await PathChanged.InvokeAsync(Path);
+        }
+    }
+
+    // Button event handlers
+    private async Task ResetCurve()
+    {
+        if (!_isInitialized) return;
+
+        // Call JavaScript reset method
+        await JS.InvokeVoidAsync($"window.hdrInstances.get({instanceId}).reset");
+    }
+
+    private async Task SaveToFile()
+    {
+        if (!_isInitialized) return;
+
+        try
+        {
+            // Get the current state from JavaScript
+            var jsonState = await JS.InvokeAsync<string>($"window.hdrInstances.get({instanceId}).exportJSON");
+
+            // Use JavaScript to trigger download
+            var escapedJson = jsonState.Replace("\\", "\\\\").Replace("'", "\\'");
+            var script = $@"
+                const blob = new Blob(['{escapedJson}'], {{type: 'application/json'}});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'hdr-curve.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            ";
+            await JS.InvokeVoidAsync("eval", script);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error saving file: {ex.Message}");
+        }
+    }
+
+    private async Task LoadFromFile()
+    {
+        if (!_isInitialized) return;
+
+        // Trigger the hidden file input
+        await JS.InvokeVoidAsync("eval", $"document.getElementById('fileInput-{instanceId}').click()");
+    }
+
+    private async Task HandleFileSelected(ChangeEventArgs e)
+    {
+        // This will be called when a file is selected
+        // The actual file reading is handled by JavaScript
     }
 
     // Event callbacks from JavaScript
+    [JSInvokable("rst")]  // reset notification
+    public async Task OnReset()
+    {
+        _isUpdatingFromJS = true;
+        try
+        {
+            // Clear the curve state
+            curveState.Clear();
+        }
+        finally
+        {
+            _isUpdatingFromJS = false;
+        }
+    }
+
     [JSInvokable("a")]  // pointAdded
     public async Task OnPointAdded(int pointId, float x, float y)
     {
-        curveState.AddPoint(pointId, x, y);
-        await UpdateWeights();
+        _isUpdatingFromJS = true;
+        try
+        {
+            curveState.AddPoint(pointId, x, y);
+            await UpdateWeightsAndPath();
+        }
+        finally
+        {
+            _isUpdatingFromJS = false;
+        }
     }
 
     [JSInvokable("d")]  // pointRemoved
     public async Task OnPointRemoved(int pointId)
     {
-        curveState.RemovePoint(pointId);
-        await UpdateWeights();
+        _isUpdatingFromJS = true;
+        try
+        {
+            curveState.RemovePoint(pointId);
+            await UpdateWeightsAndPath();
+        }
+        finally
+        {
+            _isUpdatingFromJS = false;
+        }
     }
 
     [JSInvokable("mv")] // pointMovedTo
     public async Task OnPointMovedTo(int pointId, float x, float y)
     {
-        curveState.MovePoint(pointId, x, y);
-        await UpdateWeights();
+        _isUpdatingFromJS = true;
+        try
+        {
+            curveState.MovePoint(pointId, x, y);
+            await UpdateWeightsAndPath();
+        }
+        finally
+        {
+            _isUpdatingFromJS = false;
+        }
     }
 
     [JSInvokable("c1m")] // controlVector1Moved
     public async Task OnControlVector1Moved(int pointId, float dx, float dy)
     {
-        curveState.MoveControlVector1(pointId, dx, dy);
-        await UpdateWeights();
+        _isUpdatingFromJS = true;
+        try
+        {
+            curveState.MoveControlVector1(pointId, dx, dy);
+            await UpdateWeightsAndPath();
+        }
+        finally
+        {
+            _isUpdatingFromJS = false;
+        }
     }
 
     [JSInvokable("c2m")] // controlVector2Moved
     public async Task OnControlVector2Moved(int pointId, float dx, float dy)
     {
-        curveState.MoveControlVector2(pointId, dx, dy);
-        await UpdateWeights();
+        _isUpdatingFromJS = true;
+        try
+        {
+            curveState.MoveControlVector2(pointId, dx, dy);
+            await UpdateWeightsAndPath();
+        }
+        finally
+        {
+            _isUpdatingFromJS = false;
+        }
     }
 
     public ValueTask DisposeAsync()
