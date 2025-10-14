@@ -14,3 +14,5 @@ build/
 /src/.vs/HdrSplitControl.Demo
 /src/ModelingEvolution.HdrSplitControl.Tests/bin/Debug/net9.0
 /src/ModelingEvolution.HdrSplitControl.Tests/obj
+/src/ModelingEvolution.HdrSplitControl/bin/Release
+/src/ModelingEvolution.HdrSplitControl.Tests/bin/Release/net9.0
