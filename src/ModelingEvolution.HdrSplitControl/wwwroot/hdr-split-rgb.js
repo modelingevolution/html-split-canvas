@@ -82,7 +82,7 @@ class HDRSplitCanvasRGB {
 
     resize() {
         const container = this.canvas.parentElement;
-        const containerWidth = container.clientWidth - 40; // Account for padding
+        const containerWidth = container.clientWidth;
 
         this.width = containerWidth;
         this.height = containerWidth / this.aspectRatio;
