@@ -3,7 +3,7 @@
     margin: 0 auto;
     background-color: #2a2a2a;
     border-radius: 8px;
-    padding: 20px;
+    padding: 0;
     box-shadow: 0 2px 20px rgba(0,0,0,0.5);
 }
 
@@ -34,10 +34,10 @@
     border: 1px solid #3a3a3a;
     border-radius: 4px;
     padding: 10px 15px;
-    margin: 10px 0;
+    margin: 0;
     font-size: 13px;
     color: #aaa;
-    min-width: 600px;
+    min-width: 518px;
     font-family: 'Courier New', monospace;
     display: flex;
     align-items: center;
